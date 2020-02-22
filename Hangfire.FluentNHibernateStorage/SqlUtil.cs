@@ -78,7 +78,7 @@ namespace Hangfire.FluentNHibernateStorage
         ///     HQL statement by which to update an aggregated counter based upon its key
         /// </summary>
         internal static readonly string UpdateAggregateCounterStatement = string.Format(
-            "update {0} s set s.{1}=s.{1} + :{4}, s.{3}= case when s.{3} >  :{6} then s.{3} else :{6} end where s.{2} = :{5}",
+            "update {0} s set s.{1}=s.{1} + :{4}, s.{3}= case when s.{3} is null then :{6} when s.{3} >  :{6} then s.{3} else :{6} end where s.{2} = :{5}",
             nameof(_AggregatedCounter).WrapObjectName(), nameof(_AggregatedCounter.Value).WrapObjectName(),
             nameof(_AggregatedCounter.Key).WrapObjectName(),
             nameof(_AggregatedCounter.ExpireAt).WrapObjectName(), ValueParameterName, IdParameterName,

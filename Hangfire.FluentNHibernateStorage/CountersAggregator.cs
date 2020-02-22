@@ -4,6 +4,7 @@ using System.Threading;
 using Hangfire.FluentNHibernateStorage.Entities;
 using Hangfire.Logging;
 using Hangfire.Server;
+using NHibernate;
 
 namespace Hangfire.FluentNHibernateStorage
 {
@@ -25,6 +26,7 @@ namespace Hangfire.FluentNHibernateStorage
         {
             Execute(context.CancellationToken);
         }
+
 
         public void Execute(CancellationToken cancellationToken)
         {
@@ -54,26 +56,18 @@ namespace Hangfire.FluentNHibernateStorage
                         //TODO: Consider using upsert approach
                         foreach (var item in countersByName)
                         {
-                            if (item.expireAt.HasValue)
-                            {
-                                query.SetParameter(SqlUtil.ValueParameter2Name, item.expireAt.Value);
-                            }
-                            else
-                            {
-                                query.SetParameter(SqlUtil.ValueParameter2Name, null);
-                            }
+                            Logger.DebugFormat("Updating item {0}",item.Key);
+                            query.SetParameter(SqlUtil.ValueParameter2Name, item.expireAt, NHibernateUtil.DateTime);
 
                             if (query.SetString(SqlUtil.IdParameterName, item.Key)
                                     .SetParameter(SqlUtil.ValueParameterName, item.value)
                                     .ExecuteUpdate() == 0)
-                            {
                                 session.Insert(new _AggregatedCounter
                                 {
                                     Key = item.Key,
                                     Value = item.value,
                                     ExpireAt = item.expireAt
                                 });
-                            }
                         }
 
                         removedCount =
