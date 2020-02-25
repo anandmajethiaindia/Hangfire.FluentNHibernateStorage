@@ -2,7 +2,6 @@ using System;
 using System.Data;
 using System.Threading;
 using Hangfire.Logging;
-using Newtonsoft.Json;
 
 namespace Hangfire.FluentNHibernateStorage
 {
@@ -97,7 +96,7 @@ namespace Hangfire.FluentNHibernateStorage
                                 transaction.Commit();
                                 if (Logger.IsDebugEnabled())
                                     Logger.DebugFormat("Created distributed lock for {0}",
-                                        JsonConvert.SerializeObject(lockResourceParams));
+                                        XmlConvert.SerializeObject(lockResourceParams));
                                 return true;
                             }
                         }

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Transactions;
 using FluentNHibernate.Cfg;
@@ -14,9 +13,9 @@ using Hangfire.FluentNHibernateStorage.Monitoring;
 using Hangfire.Logging;
 using Hangfire.Server;
 using Hangfire.Storage;
-using Newtonsoft.Json;
 using NHibernate;
 using Snork.FluentNHibernateTools;
+using IsolationLevel = System.Data.IsolationLevel;
 
 namespace Hangfire.FluentNHibernateStorage
 {
@@ -25,16 +24,12 @@ namespace Hangfire.FluentNHibernateStorage
         private static readonly ILog Logger = LogProvider.GetLogger(typeof(FluentNHibernateJobStorage));
 
         private readonly CountersAggregator _countersAggregator;
-        private readonly object _dateOffsetMutex = new object();
+
 
         private readonly ExpirationManager _expirationManager;
 
-        private readonly ServerTimeSyncManager _serverTimeSyncManager;
 
         private readonly ISessionFactory _sessionFactory;
-
-
-        private TimeSpan _utcOffset = TimeSpan.Zero;
 
         public FluentNHibernateJobStorage(ProviderTypeEnum providerType, string nameOrConnectionString,
             FluentNHibernateStorageOptions options = null) : this(
@@ -60,14 +55,12 @@ namespace Hangfire.FluentNHibernateStorage
             InitializeQueueProviders();
             _expirationManager = new ExpirationManager(this);
             _countersAggregator = new CountersAggregator(this);
-            _serverTimeSyncManager = new ServerTimeSyncManager(this);
 
 
             //escalate session factory issues early
             try
             {
                 EnsureDualHasOneRow();
-                RefreshUtcOffset();
             }
             catch (FluentConfigurationException ex)
             {
@@ -86,10 +79,9 @@ namespace Hangfire.FluentNHibernateStorage
         {
             get
             {
-                lock (_dateOffsetMutex)
+                using (var session = _sessionFactory.OpenSession())
                 {
-                    var utcNow = DateTime.UtcNow.Add(_utcOffset);
-                    return utcNow;
+                    return session.GetUtcNow(ProviderType);
                 }
             }
         }
@@ -98,64 +90,13 @@ namespace Hangfire.FluentNHibernateStorage
         {
         }
 
-        public void RefreshUtcOffset()
-        {
-            Logger.Debug("Refreshing UTC offset");
-            lock (_dateOffsetMutex)
-            {
-                using (var session = GetSession())
-                {
-                    IQuery query;
-                    switch (ProviderType)
-                    {
-                        case ProviderTypeEnum.None:
-                            throw new ArgumentException(string.Format("This won't work with {0} set to '{1}'",
-                                nameof(ProviderType), ProviderTypeEnum.None));
-                        case ProviderTypeEnum.OracleClient10Managed:
-                        case ProviderTypeEnum.OracleClient9Managed:
-
-                        case ProviderTypeEnum.OracleClient10:
-                        case ProviderTypeEnum.OracleClient9:
-                            query = session.CreateSqlQuery("select systimestamp at time zone 'UTC' from dual");
-                            break;
-                        case ProviderTypeEnum.PostgreSQLStandard:
-                        case ProviderTypeEnum.PostgreSQL81:
-                        case ProviderTypeEnum.PostgreSQL82:
-                            query = session.CreateSqlQuery("SELECT NOW() at time zone 'utc'");
-                            break;
-                        case ProviderTypeEnum.MySQL:
-                            query = session.CreateSqlQuery("select utc_timestamp()");
-                            break;
-                        case ProviderTypeEnum.MsSql2000:
-                        case ProviderTypeEnum.MsSql2005:
-                        case ProviderTypeEnum.MsSql2008:
-                        case ProviderTypeEnum.MsSql2012:
-                            query = session.CreateSqlQuery("select getutcdate()");
-                            break;
-                        default:
-                            query =
-                                session.CreateQuery(string.Format("select current_timestamp() from {0}",
-                                    nameof(_Dual)));
-                            break;
-                    }
-
-                    var stopwatch = new Stopwatch();
-                    var current = DateTime.UtcNow;
-                    stopwatch.Start();
-                    var serverUtc = (DateTime) query.UniqueResult();
-                    stopwatch.Stop();
-                    _utcOffset = serverUtc.Subtract(current).Subtract(stopwatch.Elapsed);
-                }
-            }
-        }
-
         private void EnsureDualHasOneRow()
         {
             try
             {
                 using (var session = GetSession())
                 {
-                    using (var transaction = session.BeginTransaction(System.Data.IsolationLevel.Serializable))
+                    using (var transaction = session.BeginTransaction(IsolationLevel.Serializable))
                     {
                         var count = session.Query<_Dual>().Count();
                         switch (count)
@@ -195,14 +136,14 @@ namespace Hangfire.FluentNHibernateStorage
         public override IEnumerable<IServerComponent> GetComponents()
 
         {
-            return new List<IServerComponent> {_expirationManager, _countersAggregator, _serverTimeSyncManager};
+            return new List<IServerComponent> {_expirationManager, _countersAggregator};
         }
 
 #pragma warning restore 618
 
         public List<IBackgroundProcess> GetBackgroundProcesses()
         {
-            return new List<IBackgroundProcess> {_expirationManager, _countersAggregator, _serverTimeSyncManager};
+            return new List<IBackgroundProcess> {_expirationManager, _countersAggregator};
         }
 
 
@@ -210,7 +151,7 @@ namespace Hangfire.FluentNHibernateStorage
         {
             if (logger.IsInfoEnabled())
                 logger.InfoFormat("Using the following options for job storage: {0}",
-                    JsonConvert.SerializeObject(Options, Formatting.Indented));
+                    XmlConvert.SerializeObject(Options));
         }
 
 
@@ -246,10 +187,10 @@ namespace Hangfire.FluentNHibernateStorage
         internal void UseTransaction([InstantHandle] Action<SessionWrapper> action)
         {
             UseTransaction(session =>
-                {
-                    action(session);
-                    return true;
-                });
+            {
+                action(session);
+                return true;
+            });
         }
 
         private TransactionScope CreateTransaction()
@@ -260,7 +201,6 @@ namespace Hangfire.FluentNHibernateStorage
                     IsolationLevel = Options.TransactionIsolationLevel,
                     Timeout = Options.TransactionTimeout
                 });
-
         }
 
         public void ResetAll()

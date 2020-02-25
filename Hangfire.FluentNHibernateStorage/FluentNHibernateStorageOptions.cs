@@ -1,6 +1,6 @@
 using System;
 using System.Transactions;
-using Newtonsoft.Json;
+using System.Xml.Serialization;
 using Snork.FluentNHibernateTools;
 
 namespace Hangfire.FluentNHibernateStorage
@@ -203,40 +203,11 @@ namespace Hangfire.FluentNHibernateStorage
             }
         }
 
-        [JsonIgnore]
+        [XmlIgnore]
         public override IObjectRenamer ObjectRenamer
         {
             get => _objectRenamer;
             set => throw new ArgumentException(string.Format("{0} cannot be set in this class", nameof(ObjectRenamer)));
-        }
-    }
-
-    internal class PrefixRenamer : IObjectRenamer
-    {
-        public PrefixRenamer(string prefix)
-        {
-            Prefix = prefix;
-        }
-
-        public string Prefix { get; }
-
-        public string Rename(ObjectTypeEnum type, string name)
-        {
-            if (Prefix.Equals(FluentNHibernateStorageOptions.DefaultTablePrefix))
-            {
-                switch (type)
-                {
-                    case ObjectTypeEnum.Table:
-                        return string.Concat(Prefix, name);
-                    default:
-                        return name;
-                }
-            }
-            else
-            {
-                return string.Concat(Prefix, name);
-            }
-           
         }
     }
 }
